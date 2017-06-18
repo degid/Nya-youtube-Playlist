@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import pickle
+import time
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon
 from PyQt5.QtCore import QUrl, QCoreApplication
@@ -162,6 +163,7 @@ class MainWindow(QWidget):
         if response['code'] == 200:
             self.OAuth20Data['token_type'] = ResponseDict['token_type']
             self.OAuth20Data['expires_in'] = ResponseDict['expires_in']
+            self.OAuth20Data['time'] = time.time()
             self.OAuth20Data['access_token'] = ResponseDict['access_token']
             if not stage:
                 self.OAuth20Data['refresh_token'] = ResponseDict['refresh_token']
@@ -194,7 +196,7 @@ class MainWindow(QWidget):
             headersStr += "{param}: {value}"\
                           "\r\n".format(param=key, value=headers[key])
 
-        with closing(ssl.wrap_socket(socket.socket(), **kwargs)) as s:
+        with closing(ssl.wrap_socket(socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None), **kwargs)) as s:
             s.connect((urlParse.hostname, 443))
             s.sendall("{metod} {path} HTTP/1.1\r\n"\
                       "Host: {hostname}\r\n"\
@@ -202,13 +204,19 @@ class MainWindow(QWidget):
                       "{headers}" \
                       "Content-Length: {len}\r\n"\
                       "\r\n".format(hostname=urlParse.hostname, len=len(params), path=path, metod=metod, headers=headersStr).encode('ascii'))
+
             if metod == 'POST':
                 s.sendall(params)
 
-            #print(dir(s))
+            data = ''
+            while True:
+                buff = s.recv(512)
+                if (len(buff) < 1):
+                    break
+                data += str(buff)[2:-1]
 
             response = {}
-            data = str(s.read())[2:-1].split("\\r\\n")
+            data = data.split("\\r\\n")
             response['method'], response['code'], response['status'] = data[0].split(" ", 2)
             response['code'] = int(response['code'])
             headers = {}
