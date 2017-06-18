@@ -35,12 +35,14 @@ class MainWindow(QWidget):
         QWidget.__init__(self, parent)
         #self.resize(700, 400)
 
+        self.requests = requests()
+
         self.OAuth20Data = {}
 
         self.icon = QIcon('terrible.png')
         self.setWindowIcon(self.icon)
 
-        self.bedtitle = False
+        self.badtitle = False
 
         self.tray = QSystemTrayIcon(self.icon)
         self.menu = QMenu()
@@ -49,9 +51,7 @@ class MainWindow(QWidget):
         self.tray.setContextMenu(self.menu)
 
         if not self.loadToken():
-            #print('nya21')
             self.show()
-
             OAuth20url = "?response_type=code&access_type=offline&" \
                          "client_id=" + appSetting['client_id'] + "&" \
                          "redirect_uri=" + appSetting['redirect_uri'] + "&" \
@@ -80,7 +80,7 @@ class MainWindow(QWidget):
         headers = {'Authorization': 'Bearer ' + self.OAuth20Data['access_token']}
         params = str(urlparse.urlencode({'part': 'snippet,contentDetails', 'mine': 'true'}).encode('ascii'))[2:-1]
 
-        response = self.createRequest('GET', 'https://www.googleapis.com/youtube/v3/subscriptions?' + params, headers)
+        response = self.requests.request('GET', 'https://www.googleapis.com/youtube/v3/subscriptions?' + params, headers)
         print(response)
         err = self.responseError(response)
         print('err', err[0], err[1])
@@ -114,6 +114,9 @@ class MainWindow(QWidget):
         #print('nya20')
         self.tray.show()
 
+    def __del__(self):
+        self.tray.hide()
+
     def saveToken(self):
         with open(program_path + 'token.pkl', 'wb') as token_pickle:
             pickle.dump(self.OAuth20Data, token_pickle)
@@ -127,12 +130,12 @@ class MainWindow(QWidget):
             return False
 
     def titleLoad(self, title):
-        if self.bedtitle:
+        if self.badtitle:
             print('Что за хрень?????')
             return
         if title.find('Success code=') != -1:
             print('Nya???????')
-            self.bedtitle = True
+            self.badtitle = True
             print(title)
             self.OAuth20Data['code'] = title[13:]
             self.saveToken()
@@ -157,7 +160,7 @@ class MainWindow(QWidget):
         params['client_secret'] = appSetting['client_secret']
         params = urlparse.urlencode(params).encode('ascii')
 
-        response = self.createRequest('POST', appSetting['token_uri'], {'Content-Type': 'application/x-www-form-urlencoded'}, params)
+        response = self.requests.request('POST', appSetting['token_uri'], {'Content-Type': 'application/x-www-form-urlencoded'}, params)
         ResponseDict = json.loads(response['ResponseText'])
 
         if response['code'] == 200:
@@ -171,41 +174,54 @@ class MainWindow(QWidget):
         else:
             return False
 
+class requests:
+    def __init__(self):
+        pass
 
-    def createRequest(self, metod, url, headers='', params=''):
+    def parseResponse(self, data):
+        response = {}
+        data = data.split("\\r\\n")
+        response['method'], response['code'], response['status'] = data[0].split(" ", 2)
+        response['code'] = int(response['code'])
+        headers = {}
+        for i, line in enumerate(data[1:]):
+            if not line.strip():
+                break
+            key, value = line.split(": ", 1)
+            headers[key] = value
+        response['headers'] = headers
+        response['ResponseText'] = data[i + 2].replace('\\n', '')
+
+        return response
+
+    def request(self, method, url, headers='', params=''):
         urlParse = urlparse.urlparse(url)
 
-        #print(urlParse)
-        #print(metod, type(metod))
-
-        if metod == 'GET':
+        if method == 'GET':
             path = urlParse.path + '?' + urlParse.query
             print(urlParse)
-        elif metod == 'POST':
+        elif method == 'POST':
             path = urlParse.path
 
         ca_certs = 'cacert.pem'
         kwargs = {}
         if os.path.exists(ca_certs):
-            kwargs.update(cert_reqs=ssl.CERT_REQUIRED,
-                          ssl_version=ssl.PROTOCOL_TLSv1,
-                          ca_certs=ca_certs)
+            kwargs.update(cert_reqs=ssl.CERT_REQUIRED, ssl_version=ssl.PROTOCOL_TLSv1, ca_certs=ca_certs)
 
         headersStr = ''
         for key in headers:
-            headersStr += "{param}: {value}"\
-                          "\r\n".format(param=key, value=headers[key])
+            headersStr += "{param}: {value}\r\n".format(param=key, value=headers[key])
 
-        with closing(ssl.wrap_socket(socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None), **kwargs)) as s:
+        with closing(ssl.wrap_socket(socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM), **kwargs)) as s:
             s.connect((urlParse.hostname, 443))
             s.sendall("{metod} {path} HTTP/1.1\r\n"\
                       "Host: {hostname}\r\n"\
                       "Connection: close\r\n"\
                       "{headers}" \
                       "Content-Length: {len}\r\n"\
-                      "\r\n".format(hostname=urlParse.hostname, len=len(params), path=path, metod=metod, headers=headersStr).encode('ascii'))
+                      "\r\n".format(hostname=urlParse.hostname, len=len(params), path=path, metod=method, headers=headersStr).encode('ascii'))
 
-            if metod == 'POST':
+            if method == 'POST':
                 s.sendall(params)
 
             data = ''
@@ -215,19 +231,7 @@ class MainWindow(QWidget):
                     break
                 data += str(buff)[2:-1]
 
-            response = {}
-            data = data.split("\\r\\n")
-            response['method'], response['code'], response['status'] = data[0].split(" ", 2)
-            response['code'] = int(response['code'])
-            headers = {}
-            for i, line in enumerate(data[1:]):
-                if not line.strip():
-                    break
-                key, value = line.split(": ", 1)
-                headers[key] = value
-            response['headers'] = headers
-            response['ResponseText'] = data[i+2].replace('\\n', '')
-        return response
+        return self.parseResponse(data)
 
 if __name__ == '__main__':
         app = None
