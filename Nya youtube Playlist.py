@@ -50,18 +50,37 @@ class MainWindow(QWidget):
             self.setLayout(self.grid)
         else:
             self.show_tray()
-            #print('nya22')
             print(self.serviceGoogle.OAuth20Data)
-            rsp = self.subscriptions()
-            print(rsp)
+            subscriptionsList = self.subscriptionsList()
+            #print(subscriptionsList)
 
-    def subscriptions(self):
+    def subscriptionsList(self):
         response = False
         if self.serviceGoogle.checkToken():
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            params = str(urlparse.urlencode({'part': 'snippet,contentDetails', 'mine': 'true'}).encode('ascii'))[2:-1]
-
+            params = str(urlparse.urlencode({'part': 'snippet,contentDetails', 'mine': 'true', 'maxResults':50}).encode('ascii'))[2:-1]
             response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/subscriptions?' + params, headers)
+            err = self.responseError(response)
+            print(err)
+
+            subscriptionsList = json.loads(response['ResponseText'])
+            print('~~~~~')
+            print(subscriptionsList)
+            print('~~~~~')
+
+            print('pageInfo', subscriptionsList['pageInfo']['totalResults'])
+            print('len', len(subscriptionsList['items']))
+
+
+        return response
+
+    def activitiesList(self, channelId):
+        response = False
+        if self.serviceGoogle.checkToken():
+            headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
+            params = str(urlparse.urlencode({'part': 'contentDetails', 'channelId': channelId, 'maxResults':25}).encode('ascii'))[2:-1]
+
+            response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/activities?' + params, headers)
 
             err = self.responseError(response)
             print(err)
@@ -105,7 +124,6 @@ class MainWindow(QWidget):
             self.serviceGoogle.getToken(False)
 
             print(self.subscriptions())
-
 
 class serviceGoogle:
     def __init__(self):
@@ -179,17 +197,18 @@ class serviceGoogle:
 
     def parseResponse(self, data):
         response = {}
-        data = data.split("\\r\\n")
+        data = data.split("\r\n")
         response['method'], response['code'], response['status'] = data[0].split(" ", 2)
         response['code'] = int(response['code'])
         headers = {}
+
         for i, line in enumerate(data[1:]):
             if not line.strip():
                 break
             key, value = line.split(": ", 1)
             headers[key] = value
         response['headers'] = headers
-        response['ResponseText'] = data[i + 2].replace('\\n', '')
+        response['ResponseText'] = data[i + 2]
 
         return response
 
@@ -218,19 +237,19 @@ class serviceGoogle:
                       "Connection: close\r\n"\
                       "{headers}" \
                       "Content-Length: {len}\r\n"\
-                      "\r\n".format(hostname=urlParse.hostname, len=len(params), path=path, metod=method, headers=headersStr).encode('ascii'))
+                      "\r\n".format(hostname=urlParse.hostname, len=len(params), path=path, metod=method, headers=headersStr).encode('utf8'))
 
             if method == 'POST':
                 s.sendall(params)
 
-            data = ''
+            data = b''
             while True:
                 buff = s.recv(512)
                 if (len(buff) < 1):
                     break
-                data += str(buff)[2:-1]
+                data += buff
 
-        return self.parseResponse(data)
+        return self.parseResponse(data.decode('utf8'))
 
 if __name__ == '__main__':
     app = None
