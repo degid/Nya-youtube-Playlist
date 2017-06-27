@@ -50,27 +50,26 @@ class MainWindow(QWidget):
             self.setLayout(self.grid)
         else:
             self.show_tray()
-            print(self.serviceGoogle.OAuth20Data)
+            #print(self.serviceGoogle.OAuth20Data)
             subscriptionsList = self.subscriptionsList()
-            #print(subscriptionsList)
+            print('Total subscriptions: ', len(subscriptionsList))
 
-    def subscriptionsList(self):
+    def subscriptionsList(self, params={}, subscriptionsItem=[]):
         response = False
         if self.serviceGoogle.checkToken():
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            params = str(urlparse.urlencode({'part': 'snippet,contentDetails', 'mine': 'true', 'maxResults':50}).encode('ascii'))[2:-1]
+            params.update({'part': 'snippet,contentDetails', 'mine': 'true', 'maxResults': 50})
+            params = urlparse.urlencode(params)
             response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/subscriptions?' + params, headers)
             err = self.responseError(response)
-            print(err)
+            #print(err)
 
             subscriptionsList = json.loads(response['ResponseText'])
-            print('~~~~~')
-            print(subscriptionsList)
-            print('~~~~~')
+            subscriptionsItem.extend(subscriptionsList['items'])
+            response = subscriptionsItem
 
-            print('pageInfo', subscriptionsList['pageInfo']['totalResults'])
-            print('len', len(subscriptionsList['items']))
-
+            if 'nextPageToken' in subscriptionsList:
+                self.subscriptionsList({'pageToken':subscriptionsList['nextPageToken']}, subscriptionsItem)
 
         return response
 
@@ -78,7 +77,7 @@ class MainWindow(QWidget):
         response = False
         if self.serviceGoogle.checkToken():
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            params = str(urlparse.urlencode({'part': 'contentDetails', 'channelId': channelId, 'maxResults':25}).encode('ascii'))[2:-1]
+            params = urlparse.urlencode({'part': 'contentDetails', 'channelId': channelId, 'maxResults':25})
 
             response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/activities?' + params, headers)
 
@@ -123,7 +122,8 @@ class MainWindow(QWidget):
 
             self.serviceGoogle.getToken(False)
 
-            print(self.subscriptions())
+            subscriptionsList = self.subscriptionsList()
+            print('Total subscriptions: ', len(subscriptionsList))
 
 class serviceGoogle:
     def __init__(self):
@@ -217,7 +217,6 @@ class serviceGoogle:
 
         if method == 'GET':
             path = urlParse.path + '?' + urlParse.query
-            print(urlParse)
         elif method == 'POST':
             path = urlParse.path
 
