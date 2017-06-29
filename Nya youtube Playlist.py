@@ -11,13 +11,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTr
 from PyQt5.QtCore import QUrl, QCoreApplication
 from PyQt5.QtGui import QIcon
 
-appSetting = {}
-appSetting['client_id'] = "875631228753-kngqvtfsvqq9cbtjkrr3mqooej52uvr0.apps.googleusercontent.com"
-appSetting['redirect_uri'] = "urn:ietf:wg:oauth:2.0:oob"
-appSetting['scope'] = "https://www.googleapis.com/auth/youtube"  # https://developers.google.com/identity/protocols/googlescopes #"+https://mail.google.com/"
-appSetting['auth_uri'] = "https://accounts.google.com/o/oauth2/auth"
-appSetting['token_uri'] = "https://accounts.google.com/o/oauth2/token"
-appSetting['client_secret'] = 'wTQnAhwHl7i7WESBq6Vtx4eN'
+CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
 
 class MainWindow(QWidget):
     def __init__(self, parent=None):
@@ -43,7 +37,7 @@ class MainWindow(QWidget):
 
             self.browser = QWebEngineView()
             self.browser.titleChanged['QString'].connect(self.titleLoad)
-            self.browser.load(QUrl(appSetting['auth_uri'] + self.serviceGoogle.OAuth20url))
+            self.browser.load(QUrl(self.serviceGoogle.appSetting['auth_uri'] + self.serviceGoogle.OAuth20url))
 
             self.grid = QGridLayout()
             self.grid.addWidget(self.browser, 0, 0)
@@ -127,12 +121,17 @@ class MainWindow(QWidget):
 
 class serviceGoogle:
     def __init__(self):
-        self.OAuth20Data = {}
+        with open(CLIENT_SECRET_FILENAME, 'rb') as client_secret:
+            self.appSetting = json.load(client_secret)
 
+        self.appSetting = self.appSetting['installed']
+        self.appSetting['scope'] = "https://www.googleapis.com/auth/youtube"
+
+        self.OAuth20Data = {}
         self.OAuth20url = "?response_type=code&access_type=offline&" \
-                     "client_id=" + appSetting['client_id'] + "&" \
-                     "redirect_uri=" + appSetting['redirect_uri'] + "&" \
-                     "scope=" + appSetting['scope']
+                     "client_id=" + self.appSetting['client_id'] + "&" \
+                     "redirect_uri=" + self.appSetting['redirect_uris'][0] + "&" \
+                     "scope=" + self.appSetting['scope']
 
         dirName = 'Nya youtube Playlist'
         if sys.platform == 'win32':
@@ -171,14 +170,14 @@ class serviceGoogle:
             print('T1')
         else:
             params = {'grant_type': 'authorization_code', 'code': self.OAuth20Data['code'],
-                        'redirect_uri': appSetting['redirect_uri']}
+                        'redirect_uri': self.appSetting['redirect_uri']}
             print('T2')
 
-        params['client_id'] = appSetting['client_id']
-        params['client_secret'] = appSetting['client_secret']
+        params['client_id'] = self.appSetting['client_id']
+        params['client_secret'] = self.appSetting['client_secret']
         params = urlparse.urlencode(params).encode('ascii')
 
-        response = self.request('POST', appSetting['token_uri'],
+        response = self.request('POST', self.appSetting['token_uri'],
                                              {'Content-Type': 'application/x-www-form-urlencoded'}, params)
         ResponseDict = json.loads(response['ResponseText'])
 
