@@ -5,7 +5,7 @@ import json
 import os
 import sys
 import pickle
-import time
+import time, datetime
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon, QTableWidget, QTableWidgetItem
 from PyQt5.QtCore import QUrl, QCoreApplication, Qt
@@ -49,7 +49,11 @@ class MainWindow(QWidget):
             self.show_tray()
             #print(self.serviceGoogle.OAuth20Data)
             self.listSubscriptionsList = self.subscriptionsList()
-            print('Total subscriptions: ', len(self.listSubscriptionsList))
+
+            for i, channel in enumerate(self.listSubscriptionsList):
+                activ = self.activitiesList(channel['snippet']['resourceId']['channelId'])
+                print(activ)
+                break
 
     def subscriptionsList(self, params={}, subscriptionsItem=[]):
         response = False
@@ -70,16 +74,28 @@ class MainWindow(QWidget):
 
         return response
 
-    def activitiesList(self, channelId):
+    def activitiesList(self, channelId, params={}, activitiesItem=[]):
         response = False
         if self.serviceGoogle.checkToken():
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            params = urlparse.urlencode({'part': 'contentDetails', 'channelId': channelId, 'maxResults':25})
+            startday = datetime.datetime.now()
+            startday = startday - datetime.timedelta(days=1)
+            startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
+            #print('startday: ', startday)
+            params.update({'part': 'contentDetails', 'channelId': channelId, 'publishedAfter':startday})
+            params = urlparse.urlencode(params) #publishedBefore
 
             response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/activities?' + params, headers)
-
             err = self.responseError(response)
             print(err)
+
+            activitiesList = json.loads(response['ResponseText'])
+            activitiesItem.extend(activitiesList['items'])
+            response = activitiesItem
+
+            if 'nextPageToken' in activitiesList:
+                self.activitiesList({'pageToken':activitiesList['nextPageToken']}, activitiesItem)
+
         return response
 
     def showSettings(self):
@@ -91,15 +107,13 @@ class MainWindow(QWidget):
         tabSubscrib.setHorizontalHeaderLabels(['Channel', ''])
         tabSubscrib.setRowCount(len(self.listSubscriptionsList))
 
-        i = 1
-        for channel in self.listSubscriptionsList:
+        for i, channel in enumerate(self.listSubscriptionsList):
             chkBoxItem = QTableWidgetItem()
             chkBoxItem.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             chkBoxItem.setCheckState(Qt.Checked)
 
-            tabSubscrib.setItem(len(self.listSubscriptionsList) - i, 0, QTableWidgetItem(channel['snippet']['title']))
-            tabSubscrib.setItem(len(self.listSubscriptionsList) - i, 1, chkBoxItem)
-            i += 1
+            tabSubscrib.setItem(i, 0, QTableWidgetItem(channel['snippet']['title']))
+            tabSubscrib.setItem(i, 1, chkBoxItem)
 
         grid = QGridLayout()
         grid.addWidget(tabSubscrib, 0, 0)
