@@ -7,8 +7,8 @@ import sys
 import pickle
 import time
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon
-from PyQt5.QtCore import QUrl, QCoreApplication
+from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon, QTableWidget, QTableWidgetItem
+from PyQt5.QtCore import QUrl, QCoreApplication, Qt
 from PyQt5.QtGui import QIcon
 
 CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
@@ -16,7 +16,7 @@ CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
 class MainWindow(QWidget):
     def __init__(self, parent=None):
         QWidget.__init__(self, parent)
-        #self.resize(700, 400)
+        self.resize(700, 400)
 
         self.OAuth20Data = {}
         self.serviceGoogle = serviceGoogle()
@@ -28,25 +28,28 @@ class MainWindow(QWidget):
 
         self.tray = QSystemTrayIcon(self.icon)
         self.menu = QMenu()
+        settingsAction = self.menu.addAction('Settings')
+        settingsAction.triggered.connect(self.showSettings)
         quitAction = self.menu.addAction('Quit')
         quitAction.triggered.connect(QCoreApplication.instance().quit)
+
         self.tray.setContextMenu(self.menu)
 
         if not self.serviceGoogle.loadDataAccess():
             self.show()
 
-            self.browser = QWebEngineView()
-            self.browser.titleChanged['QString'].connect(self.titleLoad)
-            self.browser.load(QUrl(self.serviceGoogle.appSetting['auth_uri'] + self.serviceGoogle.OAuth20url))
+            browser = QWebEngineView()
+            browser.titleChanged['QString'].connect(self.titleLoad)
+            browser.load(QUrl(self.serviceGoogle.appSetting['auth_uri'] + self.serviceGoogle.OAuth20url))
 
-            self.grid = QGridLayout()
-            self.grid.addWidget(self.browser, 0, 0)
-            self.setLayout(self.grid)
+            grid = QGridLayout()
+            grid.addWidget(browser, 0, 0)
+            self.setLayout(grid)
         else:
             self.show_tray()
             #print(self.serviceGoogle.OAuth20Data)
-            subscriptionsList = self.subscriptionsList()
-            print('Total subscriptions: ', len(subscriptionsList))
+            self.listSubscriptionsList = self.subscriptionsList()
+            print('Total subscriptions: ', len(self.listSubscriptionsList))
 
     def subscriptionsList(self, params={}, subscriptionsItem=[]):
         response = False
@@ -78,6 +81,30 @@ class MainWindow(QWidget):
             err = self.responseError(response)
             print(err)
         return response
+
+    def showSettings(self):
+        tabSubscrib = QTableWidget()
+
+        tabSubscrib.setColumnCount(2)
+        tabSubscrib.setColumnWidth(0, 550)
+        tabSubscrib.setColumnWidth(1, 20)
+        tabSubscrib.setHorizontalHeaderLabels(['Channel', ''])
+        tabSubscrib.setRowCount(len(self.listSubscriptionsList))
+
+        i = 1
+        for channel in self.listSubscriptionsList:
+            chkBoxItem = QTableWidgetItem()
+            chkBoxItem.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chkBoxItem.setCheckState(Qt.Checked)
+
+            tabSubscrib.setItem(len(self.listSubscriptionsList) - i, 0, QTableWidgetItem(channel['snippet']['title']))
+            tabSubscrib.setItem(len(self.listSubscriptionsList) - i, 1, chkBoxItem)
+            i += 1
+
+        grid = QGridLayout()
+        grid.addWidget(tabSubscrib, 0, 0)
+        self.setLayout(grid)
+        self.show()
 
 
     def responseError(self, response):
@@ -213,7 +240,6 @@ class serviceGoogle:
 
     def request(self, method, url, headers='', params=''):
         urlParse = urlparse.urlparse(url)
-
         if method == 'GET':
             path = urlParse.path + '?' + urlParse.query
         elif method == 'POST':
