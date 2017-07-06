@@ -5,7 +5,9 @@ import json
 import os
 import sys
 import pickle
-import time, datetime
+import time
+import sqlite3
+from datetime import datetime, timedelta
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon, QTableWidget, QTableWidgetItem
 from PyQt5.QtCore import QUrl, QCoreApplication, Qt
@@ -14,17 +16,19 @@ from PyQt5.QtGui import QIcon
 CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
 
 class MainWindow(QWidget):
-    def __init__(self, parent=None):
-        QWidget.__init__(self, parent)
+    def __init__(self, main):
+        super().__init__()
+
+        self.main = main
+        self.badtitle = False
+
+        self.initUI()
+
+
+    def initUI(self):
         self.resize(700, 400)
-
-        self.OAuth20Data = {}
-        self.serviceGoogle = serviceGoogle()
-
         self.icon = QIcon('terrible.png')
         self.setWindowIcon(self.icon)
-
-        self.badtitle = False
 
         self.tray = QSystemTrayIcon(self.icon)
         self.menu = QMenu()
@@ -32,28 +36,131 @@ class MainWindow(QWidget):
         settingsAction.triggered.connect(self.showSettings)
         quitAction = self.menu.addAction('Quit')
         quitAction.triggered.connect(QCoreApplication.instance().quit)
-
         self.tray.setContextMenu(self.menu)
 
-        if not self.serviceGoogle.loadDataAccess():
-            self.show()
+    def getAuth(self):
+        browser = QWebEngineView()
+        browser.titleChanged['QString'].connect(self.titleLoad)
+        browser.load(QUrl(self.main.serviceGoogle.appSetting['auth_uri'] + self.main.serviceGoogle.OAuth20url))
 
-            browser = QWebEngineView()
-            browser.titleChanged['QString'].connect(self.titleLoad)
-            browser.load(QUrl(self.serviceGoogle.appSetting['auth_uri'] + self.serviceGoogle.OAuth20url))
+        grid = QGridLayout()
+        grid.addWidget(browser, 0, 0)
+        self.setLayout(grid)
 
-            grid = QGridLayout()
-            grid.addWidget(browser, 0, 0)
-            self.setLayout(grid)
+
+    def showSettings(self):
+        self.tabSubscrib = QTableWidget()
+
+        self.tabSubscrib.setColumnCount(3)
+        self.tabSubscrib.setColumnWidth(0, 550)
+        self.tabSubscrib.setColumnWidth(1, 20)
+        self.tabSubscrib.setColumnWidth(2, 20)
+        self.tabSubscrib.setHorizontalHeaderLabels(['Channel', ''])
+        self.tabSubscrib.setRowCount(len(self.main.serviceGoogle.dbChannelList))
+
+        for i, channel in enumerate(self.main.serviceGoogle.dbChannelList):
+            chkBoxItem = QTableWidgetItem()
+            chkBoxItem.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            if channel['addplaylist']:
+                chkBoxItem.setCheckState(Qt.Checked)
+            else:
+                chkBoxItem.setCheckState(Qt.Unchecked)
+
+            self.tabSubscrib.setItem(i, 0, QTableWidgetItem(channel['title']))
+            self.tabSubscrib.setItem(i, 1, QTableWidgetItem(str(channel['id'])))
+            self.tabSubscrib.setItem(i, 2, chkBoxItem)
+
+        self.tabSubscrib.hideColumn(1)
+        self.tabSubscrib.itemChanged.connect(self.itemChanged)
+
+        grid = QGridLayout()
+        grid.addWidget(self.tabSubscrib, 0, 0)
+        self.setLayout(grid)
+        self.show()
+
+
+    def itemChanged(self, item):
+        if item.checkState() == Qt.Checked:
+            state = 1
         else:
-            self.show_tray()
-            #print(self.serviceGoogle.OAuth20Data)
-            self.listSubscriptionsList = self.subscriptionsList()
+            state = 0
+        print(state, item.row(), self.tabSubscrib.item(item.row(), 1).text())
 
-            for i, channel in enumerate(self.listSubscriptionsList):
-                activ = self.activitiesList(channel['snippet']['resourceId']['channelId'])
-                print(activ)
-                break
+        self.main.changeAddplaylist(int(self.tabSubscrib.item(item.row(), 1).text()), state)
+
+
+    def checkState(self):
+        sender = self.sender()
+        print(sender)
+
+
+    def show_tray(self):
+        self.tray.show()
+
+    def keyPressEvent(self, e):
+        print('e:', e)
+
+
+    def __del__(self):
+        self.tray.hide()
+
+
+    def titleLoad(self, title):
+        if self.badtitle:
+            print('Что за хрень?????')
+            return
+        if title.find('Success code=') != -1:
+            print('Nya???????')
+            self.badtitle = True
+            self.serviceGoogle.OAuth20Data['code'] = title[13:]
+            self.serviceGoogle.saveDataAccess()
+            self.browser.close()
+            self.hide()
+            self.show_tray()
+
+            self.serviceGoogle.getToken(False)
+
+            subscriptionsList = self.subscriptionsList()
+            print('Total subscriptions: ', len(subscriptionsList))
+
+
+class main:
+    def __init__(self):
+        self.OAuth20Data = {}
+        self.serviceGoogle = serviceGoogle()
+
+        self.serviceGoogle.db = sqlite3.connect(self.serviceGoogle.user_setting_path + 'youtube.sqlite')
+        self.createDB()
+
+        app = None
+        if not QApplication.instance():
+            app = QApplication([])
+
+        self.win = MainWindow(self)
+
+        if not self.serviceGoogle.loadDataAccess():
+            self.win.show()
+            self.win.getAuth()
+
+        else:
+            self.win.show_tray()
+
+            #self.listSubscriptionsList = self.subscriptionsList()
+
+           #for i, channel in enumerate(self.listSubscriptionsList):
+           #     activ = self.activitiesList(channel['snippet']['resourceId']['channelId'])
+           #     print(activ)
+           #     break
+
+
+            self.synchroSubscriptions()
+
+        if app: app.exec_()
+
+
+    def __del__(self):
+        self.serviceGoogle.db.close()
+
 
     def subscriptionsList(self, params={}, subscriptionsItem=[]):
         response = False
@@ -78,8 +185,8 @@ class MainWindow(QWidget):
         response = False
         if self.serviceGoogle.checkToken():
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            startday = datetime.datetime.now()
-            startday = startday - datetime.timedelta(days=1)
+            startday = datetime.now()
+            startday = startday - timedelta(days=1)
             startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
             #print('startday: ', startday)
             params.update({'part': 'contentDetails', 'channelId': channelId, 'publishedAfter':startday})
@@ -98,33 +205,11 @@ class MainWindow(QWidget):
 
         return response
 
-    def showSettings(self):
-        tabSubscrib = QTableWidget()
-
-        tabSubscrib.setColumnCount(2)
-        tabSubscrib.setColumnWidth(0, 550)
-        tabSubscrib.setColumnWidth(1, 20)
-        tabSubscrib.setHorizontalHeaderLabels(['Channel', ''])
-        tabSubscrib.setRowCount(len(self.listSubscriptionsList))
-
-        for i, channel in enumerate(self.listSubscriptionsList):
-            chkBoxItem = QTableWidgetItem()
-            chkBoxItem.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chkBoxItem.setCheckState(Qt.Checked)
-
-            tabSubscrib.setItem(i, 0, QTableWidgetItem(channel['snippet']['title']))
-            tabSubscrib.setItem(i, 1, chkBoxItem)
-
-        grid = QGridLayout()
-        grid.addWidget(tabSubscrib, 0, 0)
-        self.setLayout(grid)
-        self.show()
-
 
     def responseError(self, response):
         if response['code'] == 401:
-            if self.getToken():
-                self.saveToken()
+            if self.serviceGoogle.getToken():
+                self.serviceGoogle.saveToken()
                 print(self.serviceGoogle.OAuth20Data['access_token'])
                 return True, True
         if response['code'] == 400:
@@ -135,30 +220,91 @@ class MainWindow(QWidget):
             return False, False
 
 
-    def show_tray(self):
-        #print('nya20')
-        self.tray.show()
+    def createDB(self):
+        c = self.serviceGoogle.db.cursor()
+        query = '''SELECT 'table' FROM sqlite_master WHERE type=? AND name=?'''
+        c.execute(query, ('table', 'subscriptions'))
+        if c.fetchone() == None:
+            c.execute('''CREATE TABLE subscriptions
+                   (id integer PRIMARY KEY  NOT NULL,
+                   title          TEXT    NOT NULL,
+                   channelId      TEXT    NOT NULL,
+                   description    TEXT    NOT NULL,
+                   addplaylist    INT     NOT NULL DEFAULT ('1'),
+                   isDel          INT     NOT NULL DEFAULT ('0'));''')
+        c.close()
 
-    def __del__(self):
-        self.tray.hide()
+    def synchroSubscriptions(self):
+        listSubscriptionsList = self.subscriptionsList()
 
-    def titleLoad(self, title):
-        if self.badtitle:
-            print('Что за хрень?????')
-            return
-        if title.find('Success code=') != -1:
-            print('Nya???????')
-            self.badtitle = True
-            self.serviceGoogle.OAuth20Data['code'] = title[13:]
-            self.serviceGoogle.saveDataAccess()
-            self.browser.close()
-            self.hide()
-            self.show_tray()
+        print('F1:', len(listSubscriptionsList))
 
-            self.serviceGoogle.getToken(False)
+        dbChannelList, updateChannelList = [], []
+        c = self.serviceGoogle.db.cursor()
+        query = '''SELECT `id`, `channelId`, `title`, `description`, `isDel` FROM subscriptions'''
+        for row in c.execute(query):
+            dbChannelList.append({'id': row[0], 'channelId': row[1], 'title': row[2], 'description': row[3], 'isDel':row[4]})
 
-            subscriptionsList = self.subscriptionsList()
-            print('Total subscriptions: ', len(subscriptionsList))
+        print('dbChannelList v1', len(dbChannelList))
+
+        for n, row in enumerate(dbChannelList):
+            for i, channel in enumerate(listSubscriptionsList):
+                if (channel['snippet']['resourceId']['channelId'] == row['channelId']) and (channel['snippet']['title'] == row['title']) and (channel['snippet']['description'] == row['description']):
+                    listSubscriptionsList.pop(i)
+                    dbChannelList[n] = True
+                    break
+                elif ((channel['snippet']['resourceId']['channelId'] == row['channelId']) and (channel['snippet']['title'] != row['title'])) or ((channel['snippet']['resourceId']['channelId'] == row['channelId']) and (channel['snippet']['description'] != row['description'])):
+                    updateItem = listSubscriptionsList.pop(i)
+                    updateItem.update({'idDB':row['id']})
+                    updateChannelList.append(updateItem)
+                    dbChannelList[n] = True
+                    break
+
+        print('listSubscriptionsList', len(listSubscriptionsList))
+        print('dbChannelList v2', len(dbChannelList))
+        print('updateChannelList', len(updateChannelList))
+
+        print(dbChannelList)
+
+        commit = False
+        for channel in updateChannelList:
+            print('update', channel)
+            query = u'''UPDATE subscriptions SET title = ?, description = ? WHERE id = ?'''
+            args = (channel['snippet']['title'], channel['snippet']['description'], channel['idDB'])
+            c.execute(query, args)
+            commit = True
+
+        for channel in listSubscriptionsList:
+            print('new: ', channel)
+            query = u'''INSERT INTO subscriptions(channelId, title, description) VALUES(?,?,?)'''
+            args = (channel['snippet']['resourceId']['channelId'], channel['snippet']['title'],
+                    channel['snippet']['description'])
+            c.execute(query, args)
+            commit = True
+
+        for row in dbChannelList:
+            if row is not True:
+                print('del', row['title'])
+                query = u'''DELETE FROM subscriptions WHERE id = ?'''
+                c.execute(query, (row['id'], ))
+                commit = True
+
+        if commit: self.serviceGoogle.db.commit()
+
+        query = '''SELECT `id`, `title`, `addplaylist` FROM subscriptions WHERE isDel = 0'''
+        for row in c.execute(query):
+            self.serviceGoogle.dbChannelList.append({'id':row[0], 'title': row[1], 'addplaylist': row[2]})
+
+        c.close()
+
+
+    def changeAddplaylist(self, id, state):
+        c = self.serviceGoogle.db.cursor()
+        query = u'''UPDATE subscriptions SET addplaylist = ? WHERE id = ?'''
+        c.execute(query, (state, id))
+        self.serviceGoogle.db.commit()
+        c.close()
+
 
 class serviceGoogle:
     def __init__(self):
@@ -184,6 +330,14 @@ class serviceGoogle:
         self.user_setting_path = user_path + '/' + dirName + '/'
         if not os.path.exists(self.user_setting_path):
             os.mkdir(self.user_setting_path)
+
+        self.db = None
+        self.dbChannelList = []
+
+
+    def __del__(self):
+        pass
+
 
     def checkToken(self):
         tokenLiveTime = (self.OAuth20Data['expires_in'] - self.OAuth20Data['expires_in'] * .1)
@@ -290,8 +444,4 @@ class serviceGoogle:
         return self.parseResponse(data.decode('utf8'))
 
 if __name__ == '__main__':
-    app = None
-    if not QApplication.instance():
-        app = QApplication([])
-    dlg = MainWindow()
-    if app: app.exec_()
+    main()
