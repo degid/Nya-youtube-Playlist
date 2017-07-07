@@ -8,6 +8,7 @@ import pickle
 import time
 import sqlite3
 from datetime import datetime, timedelta
+from operator import itemgetter
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon, QTableWidget, QTableWidgetItem
 from PyQt5.QtCore import QUrl, QCoreApplication, Qt
@@ -97,9 +98,6 @@ class MainWindow(QWidget):
     def show_tray(self):
         self.tray.show()
 
-    def keyPressEvent(self, e):
-        print('e:', e)
-
 
     def __del__(self):
         self.tray.hide()
@@ -154,6 +152,7 @@ class main:
 
 
             self.synchroSubscriptions()
+            self.checkNewVideo()
 
         if app: app.exec_()
 
@@ -182,7 +181,8 @@ class main:
         return response
 
     def activitiesList(self, channelId, params={}, activitiesItem=[]):
-        response = False
+        response = []
+
         if self.serviceGoogle.checkToken():
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
             startday = datetime.now()
@@ -191,20 +191,36 @@ class main:
             #print('startday: ', startday)
             params.update({'part': 'contentDetails', 'channelId': channelId, 'publishedAfter':startday})
             params = urlparse.urlencode(params) #publishedBefore
-
             response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/activities?' + params, headers)
             err = self.responseError(response)
-            print(err)
-
+            #print(err)
             activitiesList = json.loads(response['ResponseText'])
             activitiesItem.extend(activitiesList['items'])
+
             response = activitiesItem
 
             if 'nextPageToken' in activitiesList:
-                self.activitiesList({'pageToken':activitiesList['nextPageToken']}, activitiesItem)
+                self.activitiesList(channelId, {'pageToken':activitiesList['nextPageToken']}, activitiesItem)
 
         return response
 
+    def checkNewVideo(self):
+        c = self.serviceGoogle.db.cursor()
+        query = '''SELECT `channelId` FROM subscriptions WHERE isDel=0 AND addplaylist=1'''
+        for row in c.execute(query):
+            videoList = self.activitiesList(row[0])
+
+        videos = ''
+        for video in videoList:
+            videos += video['contentDetails']['upload']['videoId'] + ','
+
+        videosMeta = self.metaVideoList(videos[:-1])
+        videoIdPub = []
+        for video in videosMeta:
+            videoIdPub.append({'id':video['id'], 'publishedAt':video['snippet']['publishedAt']})
+
+        videoIdPub = sorted(videoIdPub, key=itemgetter('publishedAt')) #reverse=True)
+        print(videoIdPub)
 
     def responseError(self, response):
         if response['code'] == 401:
@@ -237,15 +253,11 @@ class main:
     def synchroSubscriptions(self):
         listSubscriptionsList = self.subscriptionsList()
 
-        print('F1:', len(listSubscriptionsList))
-
         dbChannelList, updateChannelList = [], []
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `id`, `channelId`, `title`, `description`, `isDel` FROM subscriptions'''
         for row in c.execute(query):
             dbChannelList.append({'id': row[0], 'channelId': row[1], 'title': row[2], 'description': row[3], 'isDel':row[4]})
-
-        print('dbChannelList v1', len(dbChannelList))
 
         for n, row in enumerate(dbChannelList):
             for i, channel in enumerate(listSubscriptionsList):
@@ -259,12 +271,6 @@ class main:
                     updateChannelList.append(updateItem)
                     dbChannelList[n] = True
                     break
-
-        print('listSubscriptionsList', len(listSubscriptionsList))
-        print('dbChannelList v2', len(dbChannelList))
-        print('updateChannelList', len(updateChannelList))
-
-        print(dbChannelList)
 
         commit = False
         for channel in updateChannelList:
@@ -296,6 +302,27 @@ class main:
             self.serviceGoogle.dbChannelList.append({'id':row[0], 'title': row[1], 'addplaylist': row[2]})
 
         c.close()
+
+
+    def metaVideoList(self, channelIds, params={}, metaVideoItems=[]):
+        response = []
+        if self.serviceGoogle.checkToken():
+            headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
+            params.update({'part': 'snippet', 'id': channelIds})
+            params = urlparse.urlencode(params)
+            response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/videos?' + params, headers)
+            err = self.responseError(response)
+            #print(err)
+
+            videoList = json.loads(response['ResponseText'])
+            metaVideoItems.extend(videoList['items'])
+            response = metaVideoItems
+
+            if 'nextPageToken' in videoList:
+                #print('nextPageToken', videoList['nextPageToken'])
+                self.metaVideoList({'pageToken':videoList['nextPageToken']}, metaVideoItems)
+
+        return response
 
 
     def changeAddplaylist(self, id, state):
