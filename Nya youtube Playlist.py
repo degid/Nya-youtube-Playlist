@@ -142,9 +142,8 @@ class main:
         if app: app.exec_()
 
     def run(self):
-        print('run...')
         self.synchroSubscriptions()
-        NewVideo = []#self.checkNewVideo()
+        NewVideo = self.GetNewVideo()
         self.addVideoPlaylist(NewVideo)
 
 
@@ -164,40 +163,64 @@ class main:
                 idPlayList =  item['id']
                 break
 
+        newPlaylist = False
         if idPlayList is None:
-            print(self.serviceGoogle.OAuth20Data['access_token'])
-
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token'], 'Content-Type': 'application/json;charset=UTF-8'}
-            params = '{"snippet":{"title": "уккем"},"status":{"privacyStatus": "private"}}'.encode('utf8')
+            params = {"snippet":{"title": 'Auto ' + startday.date().isoformat()},"status":{"privacyStatus": "private"}}
 
-            response = self.serviceGoogle.request('POST', 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet%2Cstatus', headers, params)
+            response = self.serviceGoogle.request('POST', 'https://www.googleapis.com/youtube/v3/playlists?part=snippet%2Cstatus', headers, json.dumps(params).encode('utf8'))
+            err = self.serviceGoogle.responseError(response)
+            response = json.loads(response['ResponseText'])
 
-            print(response)
+            idPlayList = response['id']
+            newPlaylist = True
+
+        if not newPlaylist:
+            playlistItems = self.serviceGoogle.getData('playlistItems', {'part': 'snippet', 'playlistId': idPlayList, 'maxResults': 50})
+            for item in playlistItems:
+                if item['snippet']['resourceId']['videoId'] in idVideos:
+                    idVideos.remove(item['snippet']['resourceId']['videoId'])
+
+        for video in idVideos:
+            headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token'],
+                       'Content-Type': 'application/json;charset=UTF-8'}
+            params = {"snippet": {"playlistId": "PLchNgM6lXXmxFWjSZrZ8-d-FRFnUM2KKJ","resourceId":{"videoId": video, "kind": "youtube#video"}}}
+            response = self.serviceGoogle.request('POST', 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet', headers, json.dumps(params).encode('utf8'))
+            err = self.serviceGoogle.responseError(response)
+
+        if idVideos:
+            print('Add video in playlist "%s": %d' % ('Auto ' + startday.date().isoformat(), len(idVideos)))
 
 
-
-    def checkNewVideo(self, sortRev=False):
+    def GetNewVideo(self, sortRev=False):
         startday = datetime.now()
-        #startday = startday - timedelta(days=1)
+        startday = startday - timedelta(days=1)
         startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
         videoList = []
 
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `channelId` FROM subscriptions WHERE isDel=0 AND addplaylist=1'''
         for row in c.execute(query):
-            videoList = self.serviceGoogle.getData('activities',
+            response = self.serviceGoogle.getData('activities',
                                        {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': startday})
+            if response:
+                videoList.append(response[0])
 
         videos = ''
         for video in videoList:
             videos += video['contentDetails']['upload']['videoId'] + ','
 
         videosMeta = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videos[:-1]})
+
         videoIdPub = []
         for video in videosMeta:
             videoIdPub.append({'id':video['id'], 'publishedAt':video['snippet']['publishedAt']})
 
         videoIdPub = sorted(videoIdPub, key=itemgetter('publishedAt'), reverse=sortRev)
+
+        for i, video in enumerate(videoIdPub):
+            videoIdPub[i] = video['id']
+
         return videoIdPub
 
 
