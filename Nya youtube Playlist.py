@@ -143,16 +143,11 @@ class main:
         else:
             self.win.show_tray()
 
-            #self.listSubscriptionsList = self.subscriptionsList()
-
-           #for i, channel in enumerate(self.listSubscriptionsList):
-           #     activ = self.activitiesList(channel['snippet']['resourceId']['channelId'])
-           #     print(activ)
-           #     break
-
-
             self.synchroSubscriptions()
-            self.checkNewVideo()
+            NewVideo = self.checkNewVideo()
+            playlists = self.serviceGoogle.getData('playlists', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
+            print(playlists)
+
 
         if app: app.exec_()
 
@@ -161,79 +156,29 @@ class main:
         self.serviceGoogle.db.close()
 
 
-    def subscriptionsList(self, params={}, subscriptionsItem=[]):
-        response = False
-        if self.serviceGoogle.checkToken():
-            headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            params.update({'part': 'snippet,contentDetails', 'mine': 'true', 'maxResults': 50})
-            params = urlparse.urlencode(params)
-            response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/subscriptions?' + params, headers)
-            err = self.responseError(response)
-            #print(err)
+    def checkNewVideo(self, sortRev=False):
+        startday = datetime.now()
+        startday = startday - timedelta(days=1)
+        startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
+        videoList = []
 
-            subscriptionsList = json.loads(response['ResponseText'])
-            subscriptionsItem.extend(subscriptionsList['items'])
-            response = subscriptionsItem
-
-            if 'nextPageToken' in subscriptionsList:
-                self.subscriptionsList({'pageToken':subscriptionsList['nextPageToken']}, subscriptionsItem)
-
-        return response
-
-    def activitiesList(self, channelId, params={}, activitiesItem=[]):
-        response = []
-
-        if self.serviceGoogle.checkToken():
-            headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            startday = datetime.now()
-            startday = startday - timedelta(days=1)
-            startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
-            #print('startday: ', startday)
-            params.update({'part': 'contentDetails', 'channelId': channelId, 'publishedAfter':startday})
-            params = urlparse.urlencode(params) #publishedBefore
-            response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/activities?' + params, headers)
-            err = self.responseError(response)
-            #print(err)
-            activitiesList = json.loads(response['ResponseText'])
-            activitiesItem.extend(activitiesList['items'])
-
-            response = activitiesItem
-
-            if 'nextPageToken' in activitiesList:
-                self.activitiesList(channelId, {'pageToken':activitiesList['nextPageToken']}, activitiesItem)
-
-        return response
-
-    def checkNewVideo(self):
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `channelId` FROM subscriptions WHERE isDel=0 AND addplaylist=1'''
         for row in c.execute(query):
-            videoList = self.activitiesList(row[0])
+            videoList = self.serviceGoogle.getData('activities',
+                                       {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': startday})
 
         videos = ''
         for video in videoList:
             videos += video['contentDetails']['upload']['videoId'] + ','
 
-        videosMeta = self.metaVideoList(videos[:-1])
+        videosMeta = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videos[:-1]})
         videoIdPub = []
         for video in videosMeta:
             videoIdPub.append({'id':video['id'], 'publishedAt':video['snippet']['publishedAt']})
 
-        videoIdPub = sorted(videoIdPub, key=itemgetter('publishedAt')) #reverse=True)
-        print(videoIdPub)
-
-    def responseError(self, response):
-        if response['code'] == 401:
-            if self.serviceGoogle.getToken():
-                self.serviceGoogle.saveToken()
-                print(self.serviceGoogle.OAuth20Data['access_token'])
-                return True, True
-        if response['code'] == 400:
-            #print(json.loads(response['ResponseText']))
-            print(response['ResponseText'])
-            return True, False
-        elif response['code'] == 200:
-            return False, False
+        videoIdPub = sorted(videoIdPub, key=itemgetter('publishedAt'), reverse=sortRev)
+        return videoIdPub
 
 
     def createDB(self):
@@ -251,7 +196,7 @@ class main:
         c.close()
 
     def synchroSubscriptions(self):
-        listSubscriptionsList = self.subscriptionsList()
+        listSubscriptionsList = self.serviceGoogle.getData('subscriptions', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
 
         dbChannelList, updateChannelList = [], []
         c = self.serviceGoogle.db.cursor()
@@ -302,27 +247,6 @@ class main:
             self.serviceGoogle.dbChannelList.append({'id':row[0], 'title': row[1], 'addplaylist': row[2]})
 
         c.close()
-
-
-    def metaVideoList(self, channelIds, params={}, metaVideoItems=[]):
-        response = []
-        if self.serviceGoogle.checkToken():
-            headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token']}
-            params.update({'part': 'snippet', 'id': channelIds})
-            params = urlparse.urlencode(params)
-            response = self.serviceGoogle.request('GET', 'https://www.googleapis.com/youtube/v3/videos?' + params, headers)
-            err = self.responseError(response)
-            #print(err)
-
-            videoList = json.loads(response['ResponseText'])
-            metaVideoItems.extend(videoList['items'])
-            response = metaVideoItems
-
-            if 'nextPageToken' in videoList:
-                #print('nextPageToken', videoList['nextPageToken'])
-                self.metaVideoList({'pageToken':videoList['nextPageToken']}, metaVideoItems)
-
-        return response
 
 
     def changeAddplaylist(self, id, state):
@@ -416,6 +340,20 @@ class serviceGoogle:
         return result
 
 
+    def responseError(self, response):
+        if response['code'] == 401:
+            if self.getToken():
+                self.saveToken()
+                print(self.OAuth20Data['access_token'])
+                return True, True
+        if response['code'] == 400:
+            #print(json.loads(response['ResponseText']))
+            print(response['ResponseText'])
+            return True, False
+        elif response['code'] == 200:
+            return False, False
+
+
     def parseResponse(self, data):
         response = {}
         data = data.split("\r\n")
@@ -469,6 +407,24 @@ class serviceGoogle:
                 data += buff
 
         return self.parseResponse(data.decode('utf8'))
+
+    def getData(self, nameAPI, params):
+        response = []
+        if self.checkToken():
+            headers = {'Authorization': 'Bearer ' + self.OAuth20Data['access_token']}
+            urlParams = urlparse.urlencode(params)
+            gResponse = self.request('GET', 'https://www.googleapis.com/youtube/v3/' + nameAPI + '?' + urlParams, headers)
+            err = self.responseError(gResponse)
+            #print(err)
+
+            data = json.loads(gResponse['ResponseText'])
+            response = data['items']
+
+            if 'nextPageToken' in data:
+                params.update({'pageToken':data['nextPageToken']})
+                response.extend(self.getData(nameAPI, params))
+
+        return response
 
 if __name__ == '__main__':
     main()
