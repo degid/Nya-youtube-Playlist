@@ -15,6 +15,7 @@ from PyQt5.QtCore import QUrl, QCoreApplication, Qt
 from PyQt5.QtGui import QIcon
 
 CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
+DEBUG = False
 
 class MainWindow(QWidget):
     def __init__(self, main):
@@ -27,7 +28,7 @@ class MainWindow(QWidget):
 
 
     def initUI(self):
-        self.resize(700, 400)
+        self.resize(500, 600)
         self.icon = QIcon('terrible.png')
         self.setWindowIcon(self.icon)
 
@@ -40,12 +41,12 @@ class MainWindow(QWidget):
         self.tray.setContextMenu(self.menu)
 
     def getAuth(self):
-        browser = QWebEngineView()
-        browser.titleChanged['QString'].connect(self.titleLoad)
-        browser.load(QUrl(self.main.serviceGoogle.appSetting['auth_uri'] + self.main.serviceGoogle.OAuth20url))
+        self.browser = QWebEngineView()
+        self.browser.titleChanged['QString'].connect(self.titleLoad)
+        self.browser.load(QUrl(self.main.serviceGoogle.appSetting['auth_uri'] + self.main.serviceGoogle.OAuth20url))
 
         grid = QGridLayout()
-        grid.addWidget(browser, 0, 0)
+        grid.addWidget(self.browser, 0, 0)
         self.setLayout(grid)
 
 
@@ -108,18 +109,13 @@ class MainWindow(QWidget):
             print('Что за хрень?????')
             return
         if title.find('Success code=') != -1:
-            print('Nya???????')
             self.badtitle = True
-            self.serviceGoogle.OAuth20Data['code'] = title[13:]
-            self.serviceGoogle.saveDataAccess()
-            self.browser.close()
+            self.main.serviceGoogle.OAuth20Data['code'] = title[13:]
+            self.main.serviceGoogle.saveDataAccess()
+            self.browser.hide()
             self.hide()
             self.show_tray()
-
-            self.serviceGoogle.getToken(False)
-
-            subscriptionsList = self.subscriptionsList()
-            print('Total subscriptions: ', len(subscriptionsList))
+            self.main.run()
 
 
 class main:
@@ -139,26 +135,50 @@ class main:
         if not self.serviceGoogle.loadDataAccess():
             self.win.show()
             self.win.getAuth()
-
         else:
             self.win.show_tray()
-
-            self.synchroSubscriptions()
-            NewVideo = self.checkNewVideo()
-            playlists = self.serviceGoogle.getData('playlists', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
-            print(playlists)
-
+            self.run()
 
         if app: app.exec_()
+
+    def run(self):
+        print('run...')
+        self.synchroSubscriptions()
+        NewVideo = []#self.checkNewVideo()
+        self.addVideoPlaylist(NewVideo)
 
 
     def __del__(self):
         self.serviceGoogle.db.close()
 
 
+    def addVideoPlaylist(self, idVideos):
+        startday = datetime.now()
+        #print('Auto ' + startday.date().isoformat())
+
+        playlists = self.serviceGoogle.getData('playlists', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
+
+        idPlayList = None
+        for item in playlists:
+            if item['snippet']['title'] == 'Auto ' + startday.date().isoformat():
+                idPlayList =  item['id']
+                break
+
+        if idPlayList is None:
+            print(self.serviceGoogle.OAuth20Data['access_token'])
+
+            headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token'], 'Content-Type': 'application/json;charset=UTF-8'}
+            params = '{"snippet":{"title": "уккем"},"status":{"privacyStatus": "private"}}'.encode('utf8')
+
+            response = self.serviceGoogle.request('POST', 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet%2Cstatus', headers, params)
+
+            print(response)
+
+
+
     def checkNewVideo(self, sortRev=False):
         startday = datetime.now()
-        startday = startday - timedelta(days=1)
+        #startday = startday - timedelta(days=1)
         startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
         videoList = []
 
@@ -197,7 +217,6 @@ class main:
 
     def synchroSubscriptions(self):
         listSubscriptionsList = self.serviceGoogle.getData('subscriptions', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
-
         dbChannelList, updateChannelList = [], []
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `id`, `channelId`, `title`, `description`, `isDel` FROM subscriptions'''
@@ -263,7 +282,7 @@ class serviceGoogle:
             self.appSetting = json.load(client_secret)
 
         self.appSetting = self.appSetting['installed']
-        self.appSetting['scope'] = "https://www.googleapis.com/auth/youtube"
+        self.appSetting['scope'] = "https://www.googleapis.com/auth/youtube+https://www.googleapis.com/auth/youtube.force-ssl+https://www.googleapis.com/auth/youtubepartner"
 
         self.OAuth20Data = {}
         self.OAuth20url = "?response_type=code&access_type=offline&" \
@@ -291,8 +310,12 @@ class serviceGoogle:
 
 
     def checkToken(self):
+        if 'expires_in' is not self.OAuth20Data:
+            self.getToken(False)
+
         tokenLiveTime = (self.OAuth20Data['expires_in'] - self.OAuth20Data['expires_in'] * .1)
         timeNow = time.time()
+
         if tokenLiveTime + self.OAuth20Data['time'] < timeNow:
             return self.getToken()
         else:
@@ -313,11 +336,9 @@ class serviceGoogle:
     def getToken(self, stage=True):
         if stage:
             params = {'grant_type': 'refresh_token', 'refresh_token': self.OAuth20Data['refresh_token']}
-            print('T1')
         else:
             params = {'grant_type': 'authorization_code', 'code': self.OAuth20Data['code'],
-                        'redirect_uri': self.appSetting['redirect_uri']}
-            print('T2')
+                        'redirect_uri': self.appSetting['redirect_uris'][0]}
 
         params['client_id'] = self.appSetting['client_id']
         params['client_secret'] = self.appSetting['client_secret']
@@ -373,10 +394,8 @@ class serviceGoogle:
 
     def request(self, method, url, headers='', params=''):
         urlParse = urlparse.urlparse(url)
-        if method == 'GET':
-            path = urlParse.path + '?' + urlParse.query
-        elif method == 'POST':
-            path = urlParse.path
+        path = urlParse.path + '?' + urlParse.query
+
 
         ca_certs = 'cacert.pem'
         kwargs = {}
@@ -386,6 +405,9 @@ class serviceGoogle:
         headersStr = ''
         for key in headers:
             headersStr += "{param}: {value}\r\n".format(param=key, value=headers[key])
+
+        if DEBUG:
+            print(headersStr)
 
         with closing(ssl.wrap_socket(socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM), **kwargs)) as s:
             s.connect((urlParse.hostname, 443))
