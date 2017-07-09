@@ -42,6 +42,8 @@ class MainWindow(QWidget):
         quitAction.triggered.connect(QCoreApplication.instance().quit)
         self.tray.setContextMenu(self.menu)
 
+        self.grid = QGridLayout()
+
     def getAuth(self):
         QWebEngineProfile.defaultProfile().setCachePath(self.main.serviceGoogle.user_setting_path)
         QWebEngineProfile.defaultProfile().setPersistentStoragePath(self.main.serviceGoogle.user_setting_path + 'Storage')
@@ -50,9 +52,8 @@ class MainWindow(QWidget):
         self.browser.titleChanged['QString'].connect(self.titleLoad)
         self.browser.load(QUrl(self.main.serviceGoogle.appSetting['auth_uri'] + self.main.serviceGoogle.OAuth20url))
 
-        grid = QGridLayout()
-        grid.addWidget(self.browser, 0, 0)
-        self.setLayout(grid)
+        self.grid.addWidget(self.browser, 0, 0)
+        self.setLayout(self.grid)
 
 
     def showSettings(self):
@@ -80,9 +81,8 @@ class MainWindow(QWidget):
         self.tabSubscrib.hideColumn(1)
         self.tabSubscrib.itemChanged.connect(self.itemChanged)
 
-        grid = QGridLayout()
-        grid.addWidget(self.tabSubscrib, 0, 0)
-        self.setLayout(grid)
+        self.grid.addWidget(self.tabSubscrib, 0, 0)
+        self.setLayout(self.grid)
         self.show()
 
 
@@ -98,7 +98,6 @@ class MainWindow(QWidget):
 
     def checkState(self):
         sender = self.sender()
-        print(sender)
 
 
     def show_tray(self):
@@ -117,8 +116,11 @@ class MainWindow(QWidget):
             self.badtitle = True
             self.main.serviceGoogle.OAuth20Data['code'] = title[13:]
             self.main.serviceGoogle.saveDataAccess()
+
+            self.grid.removeWidget(self.browser)
             self.browser.hide()
             self.hide()
+
             self.show_tray()
             self.main.run()
 
@@ -145,6 +147,7 @@ class main:
             self.run()
 
         if app: app.exec_()
+
 
     def run(self):
         self.synchroSubscriptions()
