@@ -201,14 +201,22 @@ class main:
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `channelId` FROM subscriptions WHERE isDel=0 AND addplaylist=1'''
         for row in c.execute(query):
-            response = self.serviceGoogle.getData('activities',
-                                       {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': startday})
-            if response:
-                videoList.append(response[0])
+            videoList.extend(self.serviceGoogle.getData('activities',
+                                       {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': startday}))
 
         videos = ''
         for video in videoList:
-            videos += video['contentDetails']['upload']['videoId'] + ','
+            if 'upload' in video['contentDetails']:
+                videos += video['contentDetails']['upload']['videoId'] + ','
+
+            elif 'playlistItem' in video['contentDetails']:
+                videos += video['contentDetails']['playlistItem']['resourceId']['videoId'] + ','
+
+            elif 'like' in video['contentDetails']:
+                videos += video['contentDetails']['like']['resourceId']['videoId'] + ','
+
+            else:
+                print(video)
 
         videosMeta = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videos[:-1]})
 
@@ -240,6 +248,7 @@ class main:
 
     def synchroSubscriptions(self):
         listSubscriptionsList = self.serviceGoogle.getData('subscriptions', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
+        print('len listSubscriptionsList: ', len(listSubscriptionsList))
         dbChannelList, updateChannelList = [], []
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `id`, `channelId`, `title`, `description`, `isDel` FROM subscriptions'''
@@ -465,9 +474,19 @@ class serviceGoogle:
             data = json.loads(gResponse['ResponseText'])
             response = data['items']
 
+            if 'subscriptions' == nameAPI:
+                print('1', len(response))
+                print(data)
+
             if 'nextPageToken' in data:
                 params.update({'pageToken':data['nextPageToken']})
                 response.extend(self.getData(nameAPI, params))
+                if 'subscriptions' == nameAPI:
+                    print('2', len(response))
+                    print(data)
+
+            if 'subscriptions' == nameAPI:
+                print('3', len(data), params)
 
         return response
 
