@@ -9,13 +9,13 @@ import time
 import sqlite3
 from datetime import datetime, timedelta
 from operator import itemgetter
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
 from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon, QTableWidget, QTableWidgetItem
 from PyQt5.QtCore import QUrl, QCoreApplication, Qt
 from PyQt5.QtGui import QIcon
 
 CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
-DEBUG = False
+DEBUG = True
 
 class MainWindow(QWidget):
     def __init__(self, main):
@@ -34,6 +34,8 @@ class MainWindow(QWidget):
 
         self.tray = QSystemTrayIcon(self.icon)
         self.menu = QMenu()
+        settingsAction = self.menu.addAction('Run')
+        settingsAction.triggered.connect(self.main.run)
         settingsAction = self.menu.addAction('Settings')
         settingsAction.triggered.connect(self.showSettings)
         quitAction = self.menu.addAction('Quit')
@@ -41,6 +43,9 @@ class MainWindow(QWidget):
         self.tray.setContextMenu(self.menu)
 
     def getAuth(self):
+        QWebEngineProfile.defaultProfile().setCachePath(self.main.serviceGoogle.user_setting_path)
+        QWebEngineProfile.defaultProfile().setPersistentStoragePath(self.main.serviceGoogle.user_setting_path + 'Storage')
+
         self.browser = QWebEngineView()
         self.browser.titleChanged['QString'].connect(self.titleLoad)
         self.browser.load(QUrl(self.main.serviceGoogle.appSetting['auth_uri'] + self.main.serviceGoogle.OAuth20url))
@@ -194,7 +199,7 @@ class main:
 
     def GetNewVideo(self, sortRev=False):
         startday = datetime.now()
-        startday = startday - timedelta(days=1)
+        #startday = startday - timedelta(days=1)
         startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
         videoList = []
 
@@ -204,21 +209,27 @@ class main:
             videoList.extend(self.serviceGoogle.getData('activities',
                                        {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': startday}))
 
-        videos = ''
+        videos = []
         for video in videoList:
             if 'upload' in video['contentDetails']:
-                videos += video['contentDetails']['upload']['videoId'] + ','
+                videos.append(video['contentDetails']['upload']['videoId'])
+                if DEBUG: print('upload', video['contentDetails']['upload']['videoId'])
 
             elif 'playlistItem' in video['contentDetails']:
-                videos += video['contentDetails']['playlistItem']['resourceId']['videoId'] + ','
+                videos.append(video['contentDetails']['playlistItem']['resourceId']['videoId'])
+                if DEBUG: print('playlistItem', video['contentDetails']['playlistItem']['resourceId']['videoId'])
 
             elif 'like' in video['contentDetails']:
-                videos += video['contentDetails']['like']['resourceId']['videoId'] + ','
+                videos.append(video['contentDetails']['like']['resourceId']['videoId'])
+                if DEBUG: print('like', video['contentDetails']['like']['resourceId']['videoId'])
 
             else:
                 print(video)
 
-        videosMeta = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videos[:-1]})
+            videos = [e for i, e in enumerate(videos) if e not in videos[:i]]
+            videosString = ', '.join(videos)
+
+        videosMeta = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videosString})
 
         videoIdPub = []
         for video in videosMeta:
@@ -247,7 +258,7 @@ class main:
         c.close()
 
     def synchroSubscriptions(self):
-        listSubscriptionsList = self.serviceGoogle.getData('subscriptions', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
+        listSubscriptionsList = self.serviceGoogle.getData('subscriptions', {'part': 'snippet', 'mine': 'true', 'maxResults': 25})
         print('len listSubscriptionsList: ', len(listSubscriptionsList))
         dbChannelList, updateChannelList = [], []
         c = self.serviceGoogle.db.cursor()
@@ -314,7 +325,7 @@ class serviceGoogle:
             self.appSetting = json.load(client_secret)
 
         self.appSetting = self.appSetting['installed']
-        self.appSetting['scope'] = "https://www.googleapis.com/auth/youtube+https://www.googleapis.com/auth/youtube.force-ssl+https://www.googleapis.com/auth/youtubepartner"
+        self.appSetting['scope'] = "https://www.googleapis.com/auth/youtube"
 
         self.OAuth20Data = {}
         self.OAuth20url = "?response_type=code&access_type=offline&" \
@@ -437,9 +448,6 @@ class serviceGoogle:
         headersStr = ''
         for key in headers:
             headersStr += "{param}: {value}\r\n".format(param=key, value=headers[key])
-
-        if DEBUG:
-            print(headersStr)
 
         with closing(ssl.wrap_socket(socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM), **kwargs)) as s:
             s.connect((urlParse.hostname, 443))
