@@ -16,6 +16,7 @@ from PyQt5.QtGui import QIcon
 
 CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
 DEBUG = True
+MAX_DAY = 0
 
 class MainWindow(QWidget):
     def __init__(self, main):
@@ -60,7 +61,7 @@ class MainWindow(QWidget):
         self.tabSubscrib = QTableWidget()
 
         self.tabSubscrib.setColumnCount(3)
-        self.tabSubscrib.setColumnWidth(0, 550)
+        self.tabSubscrib.setColumnWidth(0, 300)
         self.tabSubscrib.setColumnWidth(1, 20)
         self.tabSubscrib.setColumnWidth(2, 20)
         self.tabSubscrib.setHorizontalHeaderLabels(['Channel', ''])
@@ -161,8 +162,6 @@ class main:
 
     def addVideoPlaylist(self, idVideos):
         startday = datetime.now()
-        #print('Auto ' + startday.date().isoformat())
-
         playlists = self.serviceGoogle.getData('playlists', {'part': 'snippet', 'mine': 'true', 'maxResults': 50})
 
         idPlayList = None
@@ -192,7 +191,7 @@ class main:
         for video in idVideos:
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token'],
                        'Content-Type': 'application/json;charset=UTF-8'}
-            params = {"snippet": {"playlistId": "PLchNgM6lXXmxFWjSZrZ8-d-FRFnUM2KKJ","resourceId":{"videoId": video, "kind": "youtube#video"}}}
+            params = {"snippet": {"playlistId": idPlayList,"resourceId":{"videoId": video, "kind": "youtube#video"}}}
             response = self.serviceGoogle.request('POST', 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet', headers, json.dumps(params).encode('utf8'))
             err = self.serviceGoogle.responseError(response)
 
@@ -201,16 +200,21 @@ class main:
 
 
     def GetNewVideo(self, sortRev=False):
-        startday = datetime.now()
-        #startday = startday - timedelta(days=1)
-        startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
-        videoList = []
+        if 'lastRun' is not self.serviceGoogle.OAuth20Data:
+             startday = datetime.now()
+             startday = startday - timedelta(days=MAX_DAY)
+             startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
+             self.serviceGoogle.OAuth20Data['lastRun'] = startday
+             videoList = []
 
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `channelId` FROM subscriptions WHERE isDel=0 AND addplaylist=1'''
         for row in c.execute(query):
             videoList.extend(self.serviceGoogle.getData('activities',
-                                       {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': startday}))
+                                       {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': self.serviceGoogle.OAuth20Data['lastRun']}))
+
+        self.serviceGoogle.OAuth20Data['lastRun'] = datetime.now().replace(microsecond=0).isoformat() + 'Z'
+        self.serviceGoogle.saveDataAccess()
 
         videos = []
         for video in videoList:
