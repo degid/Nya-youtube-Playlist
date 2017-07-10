@@ -201,11 +201,11 @@ class main:
 
     def GetNewVideo(self, sortRev=False):
         if 'lastRun' is not self.serviceGoogle.OAuth20Data:
-             startday = datetime.now()
-             startday = startday - timedelta(days=MAX_DAY)
-             startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
-             self.serviceGoogle.OAuth20Data['lastRun'] = startday
-             videoList = []
+            startday = datetime.now()
+            startday = startday - timedelta(days=MAX_DAY)
+            startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
+            self.serviceGoogle.OAuth20Data['lastRun'] = startday
+            videoList = []
 
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `channelId` FROM subscriptions WHERE isDel=0 AND addplaylist=1'''
@@ -230,16 +230,24 @@ class main:
                 videos.append(video['contentDetails']['like']['resourceId']['videoId'])
                 if DEBUG: print('like', video['contentDetails']['like']['resourceId']['videoId'])
 
+            elif 'subscription' in video['contentDetails']:
+                if DEBUG: print('subscription channelId', video['contentDetails']['subscription']['resourceId']['channelId'])
+                continue
+
             else:
                 print(video)
 
-            videos = [e for i, e in enumerate(videos) if e not in videos[:i]]
-            videosString = ', '.join(videos)
+        videos = [e for i, e in enumerate(videos) if e not in videos[:i]]
 
-        videosMeta = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videosString})
+        partVideos = partList(videos, 25)
+        videosInfo = []
+        for i, partVideo in enumerate(partVideos):
+            videosString = ', '.join(partVideo)
+            response = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videosString})
+            videosInfo.extend(response)
 
         videoIdPub = []
-        for video in videosMeta:
+        for video in videosInfo:
             videoIdPub.append({'id':video['id'], 'publishedAt':video['snippet']['publishedAt']})
 
         videoIdPub = sorted(videoIdPub, key=itemgetter('publishedAt'), reverse=sortRev)
@@ -504,6 +512,20 @@ class serviceGoogle:
                 print('3', len(data), params)
 
         return response
+
+def partList(longList, listLen):
+    listParts = []
+    while True:
+        if len(longList) > listLen:
+            listParts.append(longList[:listLen])
+            longList = longList[listLen:]
+        else:
+            if len(longList) > 0:
+                listParts.append(longList)
+            break
+
+    return listParts
+
 
 if __name__ == '__main__':
     main()
