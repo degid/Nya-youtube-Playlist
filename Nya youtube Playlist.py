@@ -17,6 +17,8 @@ from PyQt5.QtGui import QIcon
 CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
 DEBUG = True
 MAX_DAY = 0
+TIMEOUT = .5
+
 
 class MainWindow(QWidget):
     def __init__(self, main):
@@ -194,9 +196,19 @@ class main:
             params = {"snippet": {"playlistId": idPlayList,"resourceId":{"videoId": video, "kind": "youtube#video"}}}
             response = self.serviceGoogle.request('POST', 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet', headers, json.dumps(params).encode('utf8'))
             err = self.serviceGoogle.responseError(response)
+            if True in err:
+                time.sleep(5)
+                response = self.serviceGoogle.request('POST',
+                                                      'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet',
+                                                      headers, json.dumps(params).encode('utf8'))
+                err = self.serviceGoogle.responseError(response)
+
+            time.sleep(TIMEOUT)
 
         if idVideos:
             print('Add video in playlist "%s": %d' % ('Auto ' + startday.date().isoformat(), len(idVideos)))
+        else:
+            print('No new videos')
 
 
     def GetNewVideo(self, sortRev=False):
@@ -205,13 +217,15 @@ class main:
             startday = startday - timedelta(days=MAX_DAY)
             startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
             self.serviceGoogle.OAuth20Data['lastRun'] = startday
-            videoList = []
 
+        videoList = []
         c = self.serviceGoogle.db.cursor()
         query = '''SELECT `channelId` FROM subscriptions WHERE isDel=0 AND addplaylist=1'''
         for row in c.execute(query):
             videoList.extend(self.serviceGoogle.getData('activities',
                                        {'part': 'contentDetails', 'channelId': row[0], 'publishedAfter': self.serviceGoogle.OAuth20Data['lastRun']}))
+            print('channelId:', row[0], '| Total new videos:', len(videoList))
+            time.sleep(TIMEOUT)
 
         self.serviceGoogle.OAuth20Data['lastRun'] = datetime.now().replace(microsecond=0).isoformat() + 'Z'
         self.serviceGoogle.saveDataAccess()
@@ -232,7 +246,10 @@ class main:
 
             elif 'subscription' in video['contentDetails']:
                 if DEBUG: print('subscription channelId', video['contentDetails']['subscription']['resourceId']['channelId'])
-                continue
+
+            elif 'bulletin' in video['contentDetails']:
+                videos.append(video['contentDetails']['bulletin']['resourceId']['videoId'])
+                if DEBUG: print('bulletin', video['contentDetails']['bulletin']['resourceId']['videoId'])
 
             else:
                 print(video)
@@ -425,12 +442,20 @@ class serviceGoogle:
                 self.saveToken()
                 print(self.OAuth20Data['access_token'])
                 return True, True
-        if response['code'] == 400:
+        elif response['code'] == 400:
             #print(json.loads(response['ResponseText']))
             print(response['ResponseText'])
             return True, False
         elif response['code'] == 200:
             return False, False
+        elif response['code'] == 403:
+            data = json.loads(response['ResponseText'])
+            if data['error']['errors'][0]['reason'] == 'quotaExceeded':
+                print(data['error']['message'])
+                return True, True
+        else:
+            print(response['ResponseText'])
+            return True, True
 
 
     def parseResponse(self, data):
