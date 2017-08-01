@@ -153,6 +153,7 @@ class main:
 
 
     def run(self):
+        print(self.serviceGoogle.OAuth20Data['lastRun'])
         self.synchroSubscriptions()
         NewVideo = self.GetNewVideo()
         self.addVideoPlaylist(NewVideo)
@@ -197,11 +198,13 @@ class main:
             response = self.serviceGoogle.request('POST', 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet', headers, json.dumps(params).encode('utf8'))
             err = self.serviceGoogle.responseError(response)
             if True in err:
-                time.sleep(5)
+                time.sleep(60*2)
                 response = self.serviceGoogle.request('POST',
                                                       'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet',
                                                       headers, json.dumps(params).encode('utf8'))
                 err = self.serviceGoogle.responseError(response)
+                if True in err:
+                    print('This bed!')
 
             time.sleep(TIMEOUT)
 
@@ -212,7 +215,7 @@ class main:
 
 
     def GetNewVideo(self, sortRev=False):
-        if 'lastRun' is not self.serviceGoogle.OAuth20Data:
+        if not 'lastRun' in self.serviceGoogle.OAuth20Data:
             startday = datetime.now()
             startday = startday - timedelta(days=MAX_DAY)
             startday = startday.combine(startday.date(), startday.min.time()).replace(microsecond=0).isoformat() + 'Z'
@@ -229,6 +232,7 @@ class main:
 
         self.serviceGoogle.OAuth20Data['lastRun'] = datetime.now().replace(microsecond=0).isoformat() + 'Z'
         self.serviceGoogle.saveDataAccess()
+        print(self.serviceGoogle.OAuth20Data['lastRun'])
 
         videos = []
         for video in videoList:
