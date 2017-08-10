@@ -16,17 +16,14 @@ from PyQt5.QtGui import QIcon
 
 CLIENT_SECRET_FILENAME = 'client_secret_apps.googleusercontent.com.json'
 DEBUG = True
-MAX_DAY = 0
+MAX_DAY = 1
 TIMEOUT = .5
 
 
 class MainWindow(QWidget):
     def __init__(self, main):
         super().__init__()
-
         self.main = main
-        self.badtitle = False
-
         self.initUI()
 
 
@@ -112,20 +109,12 @@ class MainWindow(QWidget):
 
 
     def titleLoad(self, title):
-        if self.badtitle:
-            print('Что за хрень?????')
-            return
         if title.find('Success code=') != -1:
-            self.badtitle = True
             self.main.serviceGoogle.OAuth20Data['code'] = title[13:]
             self.main.serviceGoogle.saveDataAccess()
 
-            self.grid.removeWidget(self.browser)
-            self.browser.hide()
             self.hide()
-
-            self.show_tray()
-            self.main.run()
+            self.main.reWin()
 
 
 class main:
@@ -136,24 +125,33 @@ class main:
         self.serviceGoogle.db = sqlite3.connect(self.serviceGoogle.user_setting_path + 'youtube.sqlite')
         self.createDB()
 
-        app = None
+        self.app = None
         if not QApplication.instance():
-            app = QApplication([])
+            self.app = QApplication([])
 
         self.win = MainWindow(self)
 
         if not self.serviceGoogle.loadDataAccess():
             self.win.show()
             self.win.getAuth()
+
         else:
             self.win.show_tray()
             self.run()
 
-        if app: app.exec_()
+        if self.app: result = self.app.exec_()
+
+
+    def reWin(self):
+        # https://bugreports.qt.io/browse/QTBUG-57228
+        del self.win
+        self.win = MainWindow(self)
+        self.win.show_tray()
+        self.run()
 
 
     def run(self):
-        print(self.serviceGoogle.OAuth20Data['lastRun'])
+        if 'lastRun' in self.serviceGoogle.OAuth20Data: print(self.serviceGoogle.OAuth20Data['lastRun'])
         self.synchroSubscriptions()
         NewVideo = self.GetNewVideo()
         self.addVideoPlaylist(NewVideo)
