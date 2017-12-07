@@ -4,11 +4,13 @@ from contextlib import closing
 import json
 import os
 import sys
-import pickle
+import _pickle as pickle
 import time
 import sqlite3
 from datetime import datetime, timedelta
 from operator import itemgetter
+from itertools import zip_longest
+
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
 from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout, QMenu, QSystemTrayIcon, QTableWidget, QTableWidgetItem
 from PyQt5.QtCore import QUrl, QCoreApplication, Qt
@@ -152,6 +154,7 @@ class main:
 
     def run(self):
         if 'lastRun' in self.serviceGoogle.OAuth20Data: print(self.serviceGoogle.OAuth20Data['lastRun'])
+        if 'lastRun' in self.serviceGoogle.OAuth20Data: print(datetime.now()-timedelta(days=MAX_DAY))
         self.synchroSubscriptions()
         NewVideo = self.GetNewVideo()
         self.addVideoPlaylist(NewVideo)
@@ -185,10 +188,12 @@ class main:
 
         if not newPlaylist:
             playlistItems = self.serviceGoogle.getData('playlistItems', {'part': 'snippet', 'playlistId': idPlayList, 'maxResults': 50})
+            print('Already exists in the playlist:', len(playlistItems), 'videos')
             for item in playlistItems:
                 if item['snippet']['resourceId']['videoId'] in idVideos:
                     idVideos.remove(item['snippet']['resourceId']['videoId'])
 
+        no_added = []
         for video in idVideos:
             headers = {'Authorization': 'Bearer ' + self.serviceGoogle.OAuth20Data['access_token'],
                        'Content-Type': 'application/json;charset=UTF-8'}
@@ -202,7 +207,9 @@ class main:
                                                       headers, json.dumps(params).encode('utf8'))
                 err = self.serviceGoogle.responseError(response)
                 if True in err:
-                    print('This bed!')
+                    no_added.append(video)
+                else:
+                    print('readded...')
 
             time.sleep(TIMEOUT)
 
@@ -210,6 +217,9 @@ class main:
             print('Add video in playlist "%s": %d' % ('Auto ' + startday.date().isoformat(), len(idVideos)))
         else:
             print('No new videos')
+
+        if no_added:
+            print(no_added)
 
 
     def GetNewVideo(self, sortRev=False):
@@ -256,14 +266,20 @@ class main:
             else:
                 print(video)
 
+        print('==========================================================')
+
         videos = [e for i, e in enumerate(videos) if e not in videos[:i]]
 
-        partVideos = partList(videos, 25)
+        partVideos = partList(videos, 15)
+        print(len(partVideos), partVideos)
+        print('==========================================================')
         videosInfo = []
         for i, partVideo in enumerate(partVideos):
             videosString = ', '.join(partVideo)
+            print(videosString)
             response = self.serviceGoogle.getData('videos', {'part': 'snippet', 'id': videosString})
             videosInfo.extend(response)
+            time.sleep(TIMEOUT)
 
         videoIdPub = []
         for video in videosInfo:
@@ -524,35 +540,33 @@ class serviceGoogle:
             data = json.loads(gResponse['ResponseText'])
             response = data['items']
 
-            if 'subscriptions' == nameAPI:
-                print('1', len(response))
-                print(data)
+            # if 'subscriptions' == nameAPI:
+            #     print('1', len(response))
+            #     print(data)
 
             if 'nextPageToken' in data:
                 params.update({'pageToken':data['nextPageToken']})
                 response.extend(self.getData(nameAPI, params))
-                if 'subscriptions' == nameAPI:
-                    print('2', len(response))
-                    print(data)
+                # if 'subscriptions' == nameAPI:
+                #     print('2', len(response))
+                #     print(data)
 
-            if 'subscriptions' == nameAPI:
-                print('3', len(data), params)
+            # if 'subscriptions' == nameAPI:
+            #     print('3', len(data), params)
 
         return response
 
+
 def partList(longList, listLen):
+    iterpart = [iter(longList)] * listLen
     listParts = []
-    while True:
-        if len(longList) > listLen:
-            listParts.append(longList[:listLen])
-            longList = longList[listLen:]
-        else:
-            if len(longList) > 0:
-                listParts.append(longList)
-            break
+    for row in zip_longest(*iterpart, fillvalue=None):
+        listParts.append(row)
+
+    if None in listParts[-1]:
+        listParts[-1] = list(filter(None, listParts[-1]))
 
     return listParts
-
 
 if __name__ == '__main__':
     main()
